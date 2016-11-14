@@ -66,6 +66,8 @@ int main()
     TrainSequenceToSequenceTranslator();
     TrainTruncatedLSTMAcousticModelClassifer();
 
+    MinibatchSourceTests();
+
     MultiThreadsEvaluation(IsGPUAvailable());
 
     fprintf(stderr, "\nCNTKv2Library tests: Passed\n");

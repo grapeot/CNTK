@@ -114,15 +114,13 @@ MinibatchSourcePtr TextFormatMinibatchSourceWithMockCommunicator(const std::wstr
 
     deserializerConfiguration[L"input"] = inputStreamsConfig;
     minibatchSourceConfiguration[L"deserializers"] = std::vector<::CNTK::DictionaryValue>({ deserializerConfiguration });
-
     minibatchSourceConfiguration[L"distributedAfterSampleCount"] = distributedAfterSampleCount;
-
     minibatchSourceConfiguration[L"mockCommunicator"] = reinterpret_cast<size_t>(pMockCommunicatoryPtr);
 
     return CreateCompositeMinibatchSource(minibatchSourceConfiguration);
 }
 
-void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t warmStartSamples)
+void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t warmStartSamples, bool randomize)
 {
     const size_t inputDim = 2;
     const size_t numOutputClasses = 2;
@@ -135,7 +133,7 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
         L"SimpleDataTrain_cntk_text.txt",
         { { featureStreamName, inputDim }, { labelsStreamName, numOutputClasses } },
         MinibatchSource::InfinitelyRepeat,
-        false,
+        randomize,
         warmStartSamples,
         &mockCommunicator);
 
@@ -156,11 +154,12 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
 
         // NOTE: the expectedNumSamples are valid only in this test case scenario
         size_t expectedNumSamples = distributed ? minibatchSize / numWorkers : minibatchSize;
+        size_t actualNumSamples = minibatchData[featureStreamInfo].m_numSamples;
 
-        if (minibatchData[featureStreamInfo].m_numSamples != expectedNumSamples)
+        if (actualNumSamples != expectedNumSamples)
         {
             ReportFailure("TestMinibatchSourceWarmStart failed in sample count: expected %lu, actual %lu",
-                expectedNumSamples, minibatchData[featureStreamInfo].m_numSamples);
+                expectedNumSamples, actualNumSamples);
         }
 
         totalSamples += minibatchSize;
@@ -169,7 +168,8 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
 
 void MinibatchSourceTests()
 {
-    TestMinibatchSourceWarmStart(10, 64, 128);
-    TestMinibatchSourceWarmStart(10, 64, 0);
-    TestMinibatchSourceWarmStart(10, 64, 100);
+    TestMinibatchSourceWarmStart(10, 64, 128, false);
+    TestMinibatchSourceWarmStart(10, 64, 0, false);
+    TestMinibatchSourceWarmStart(10, 64, 100, false);
+    TestMinibatchSourceWarmStart(10, 64, 128, true);
 }
