@@ -243,6 +243,7 @@ namespace CNTK
 
                 m_shim->StartEpoch(epochConfig, inputs);
                 m_prevMinibatchSize = minibatchSizeInSamples;
+                prevNumWorkers = m_numWorkers;
             }
 
             if (minibatchSizeInSamples != m_prevMinibatchSize || prevNumWorkers != m_numWorkers)
