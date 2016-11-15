@@ -137,39 +137,69 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
         warmStartSamples,
         &mockCommunicator);
 
+    DistributedCommunicatorPtr mockCommunicator2 = std::make_shared<MockCommunicator>(numWorkers);
+    (dynamic_cast<MockCommunicator*>(mockCommunicator2.get()))->MockRank(1);
+
+    auto minibatchSource2 = TextFormatMinibatchSourceWithMockCommunicator(
+        L"SimpleDataTrain_cntk_text.txt",
+        { { featureStreamName, inputDim }, { labelsStreamName, numOutputClasses } },
+        MinibatchSource::InfinitelyRepeat,
+        randomize,
+        warmStartSamples,
+        &mockCommunicator2);
+
     auto featureStreamInfo = minibatchSource->StreamInfo(featureStreamName);
     auto labelStreamInfo = minibatchSource->StreamInfo(labelsStreamName);
+
+    auto featureStreamInfo2 = minibatchSource2->StreamInfo(featureStreamName);
+    auto labelStreamInfo2 = minibatchSource2->StreamInfo(labelsStreamName);
 
     size_t totalSamples = 0;
     for (size_t i = 0; i < numMBs; ++i)
     {
         bool distributed = minibatchSource->IsDistributed();
-        if (distributed != (totalSamples >= warmStartSamples))
+        bool distributed2 = minibatchSource2->IsDistributed();
+        if (distributed != (totalSamples >= warmStartSamples) || distributed != distributed2)
         {
             ReportFailure("TestMinibatchSourceWarmStart failed in distributed state: expected %d, actual %d",
                 totalSamples >= warmStartSamples, distributed);
         }
 
         auto minibatchData = minibatchSource->GetNextMinibatch(minibatchSize);
+        auto minibatchData2 = minibatchSource2->GetNextMinibatch(minibatchSize);
 
         // NOTE: the expectedNumSamples are valid only in this test case scenario
-        size_t expectedNumSamples = distributed ? minibatchSize / numWorkers : minibatchSize;
-        size_t actualNumSamples = minibatchData[featureStreamInfo].m_numSamples;
+        size_t expectedNumSamples = minibatchSize;
+        size_t numSamples = minibatchData[featureStreamInfo].m_numSamples;
+        size_t numSamples2 = minibatchData2[featureStreamInfo].m_numSamples;
+
+        if (!distributed && numSamples != numSamples2)
+        {
+            ReportFailure("TestMinibatchSourceWarmStart failed in sample count: expected %lu, distributed %d (0:%lu, 1:%lu)",
+                expectedNumSamples, distributed, numSamples, numSamples2);
+        }
+
+        size_t actualNumSamples = distributed ? numSamples + numSamples2 : numSamples;
 
         if (actualNumSamples != expectedNumSamples)
         {
-            ReportFailure("TestMinibatchSourceWarmStart failed in sample count: expected %lu, actual %lu",
-                expectedNumSamples, actualNumSamples);
+            ReportFailure("TestMinibatchSourceWarmStart failed in sample count: expected %lu, actual %lu distributed %d (%lu+%lu)",
+                expectedNumSamples, actualNumSamples, distributed, numSamples, numSamples2);
         }
 
-        totalSamples += minibatchSize;
+        totalSamples += actualNumSamples;
     }
 }
 
 void MinibatchSourceTests()
 {
+    /*
+    // Test no-randomize minibatch source
     TestMinibatchSourceWarmStart(10, 64, 128, false);
     TestMinibatchSourceWarmStart(10, 64, 0, false);
     TestMinibatchSourceWarmStart(10, 64, 100, false);
+    */
+    // Test randomized minibatch source
+    //TestMinibatchSourceWarmStart(10, 64, 0, true);
     TestMinibatchSourceWarmStart(10, 64, 128, true);
 }
