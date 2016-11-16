@@ -7,6 +7,7 @@
 import os
 import math
 import numpy as np
+import argparse
 
 from cntk.blocks import default_options
 from cntk.layers import Convolution, AveragePooling, GlobalAveragePooling, Dropout, BatchNormalization, Dense
@@ -127,15 +128,15 @@ def resnet_basic_stack(input, num_filters, num_stack):
 #   
 # Defines the residual network model for classifying images
 #
-def create_resnet_model(input, num_classes):
+def create_resnet_model(input, num_classes, num_layers):
     conv = convolution_bn(input, (3,3), 16)
-    r1_1 = resnet_basic_stack(conv, 16, 3)
+    r1_1 = resnet_basic_stack(conv, 16, num_layers)
 
     r2_1 = resnet_basic_inc(r1_1, 32)
-    r2_2 = resnet_basic_stack(r2_1, 32, 2)
+    r2_2 = resnet_basic_stack(r2_1, 32, num_layers - 1)
 
     r3_1 = resnet_basic_inc(r2_2, 64)
-    r3_2 = resnet_basic_stack(r3_1, 64, 2)
+    r3_2 = resnet_basic_stack(r3_1, 64, num_layers - 1)
 
     pool = GlobalAveragePooling()(r3_2) 
     net = Dense(num_classes, init=he_normal(), activation=None)(pool)
@@ -156,7 +157,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     input_var_norm = element_times(feature_scale, input_var)
 
     # apply model to input
-    z = create_resnet_model(input_var_norm, 10)
+    z = create_resnet_model(input_var_norm, 10, num_layers=3) # resnet110
 
     #
     # Training action
@@ -171,7 +172,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     minibatch_size = 128
 
     # Set learning parameters
-    lr_per_minibatch       = learning_rate_schedule([1]*80 + [0.1]*40 + [0.01], UnitType.minibatch, epoch_size)
+    lr_per_minibatch       = learning_rate_schedule([0.1]+[1]*80 + [0.1]*40 + [0.01], UnitType.minibatch, epoch_size)
     momentum_time_constant = momentum_as_time_constant_schedule(-minibatch_size/np.log(0.9))
     l2_reg_weight          = 0.0001
     
@@ -236,8 +237,17 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     return metric_numer/metric_denom
 
 if __name__=='__main__':
-    distributed_after_samples = 50000
-    num_quantization_bits = 32
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-q', '--quantize_bit', help='quantized bit', required=False, default='32')
+    parser.add_argument('-e', '--epochs', help='total epochs', required=False, default='160')
+    parser.add_argument('-w', '--warm_start', help='number of samples to warm start before running distributed', required=False, default='50000')
+    args = vars(parser.parse_args())
+    num_quantization_bits = int(args['quantize_bit'])
+    epochs = int(args['epochs'])
+    distributed_after_samples = int(args['warm_start'])
+    
+    print("Start training: quantizeBit = {}, epochs = {}, warm_start = {}".format(num_quantization_bits, epochs, distributed_after_samples))
+
     distributed_trainer = distributed.data_parallel_distributed_trainer(
         num_quantization_bits=num_quantization_bits,
         distributed_after=distributed_after_samples)
@@ -245,4 +255,5 @@ if __name__=='__main__':
     reader_train = create_reader(os.path.join(data_path, 'train_map.txt'), os.path.join(data_path, 'CIFAR-10_mean.xml'), True, distributed_after_samples)
     reader_test  = create_reader(os.path.join(data_path, 'test_map.txt'), os.path.join(data_path, 'CIFAR-10_mean.xml'), False)
 
-    train_and_evaluate(reader_train, reader_test, max_epochs=5, distributed_trainer=distributed_trainer)
+    train_and_evaluate(reader_train, reader_test, max_epochs=epochs, distributed_trainer=distributed_trainer)
+    distributed.Communicator.finalize()
