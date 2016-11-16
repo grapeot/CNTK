@@ -136,6 +136,9 @@ namespace CNTK
 
         if (m_epochSize == MinibatchSource::FullDataSweep)
             m_epochSize = Microsoft::MSR::CNTK::requestDataSize;
+        // Setting big value, but not the max in order to aviod bit overflow.
+        else if (m_epochSize == MinibatchSource::InfinitelyRepeat)
+            m_epochSize = std::numeric_limits<size_t>::max()/2;
 
         const wchar_t* truncatedConfigurationKey = L"truncated";
         const wchar_t* truncationLengthConfigurationKey = L"truncationLength";

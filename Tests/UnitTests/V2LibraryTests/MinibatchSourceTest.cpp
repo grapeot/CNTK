@@ -200,5 +200,5 @@ void MinibatchSourceTests()
 
     // Test randomized minibatch source
     TestMinibatchSourceWarmStart(10, 64, 0, true);
-    //TestMinibatchSourceWarmStart(10, 64, 128, true);
+    TestMinibatchSourceWarmStart(10, 64, 128, true);
 }

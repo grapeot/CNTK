@@ -136,6 +136,7 @@ void ReaderShim<ElemType>::SetConfiguration(const ReaderConfiguration& config, c
         m_dataTransferers[m_currentDataTransferIndex]->WaitForCopyCPUToGPU();
 
     m_reader->SetConfiguration(config, inputDescriptions);
+    m_reader->SetCurrentSamplePosition(m_currentSamplePosition);
 
     // Start prefetch.
     auto localCurrentDataTransferIndex = m_currentDataTransferIndex;
@@ -145,7 +146,6 @@ void ReaderShim<ElemType>::SetConfiguration(const ReaderConfiguration& config, c
     m_prefetchTask = std::async(m_launchType,
         [this, localCurrentDataTransferIndex]()
     {
-        m_reader->SetCurrentSamplePosition(m_currentSamplePosition);
         return PrefetchMinibatch(localCurrentDataTransferIndex);
     });
 }
