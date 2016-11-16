@@ -193,13 +193,12 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
 
 void MinibatchSourceTests()
 {
-    /*
     // Test no-randomize minibatch source
     TestMinibatchSourceWarmStart(10, 64, 128, false);
     TestMinibatchSourceWarmStart(10, 64, 0, false);
     TestMinibatchSourceWarmStart(10, 64, 100, false);
-    */
+
     // Test randomized minibatch source
-    //TestMinibatchSourceWarmStart(10, 64, 0, true);
-    TestMinibatchSourceWarmStart(10, 64, 128, true);
+    TestMinibatchSourceWarmStart(10, 64, 0, true);
+    //TestMinibatchSourceWarmStart(10, 64, 128, true);
 }
