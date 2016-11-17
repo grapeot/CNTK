@@ -13,8 +13,25 @@ from ..learner import *
 from .. import distributed
 from .. import cross_entropy_with_softmax, classification_error, parameter, \
         input_variable, times, plus, reduce_sum
+        
+def create_data_parallel_distributed_trainer(quantized, warm_start):
+    return distributed.data_parallel_distributed_trainer(
+        use_async_buffered_parameter_update=False,
+        num_quantization_bits=(1 if quantized else 32),
+        distributed_after=warm_start)
 
-def run_distributed_trainer(tmpdir, quantized):
+def create_block_momentum_distributed_trainer(quantized, warm_start):
+    return distributed.block_momentum_distributed_trainer(
+        block_size=1024,
+        distributed_after = warm_start)
+
+def create_block_momentum_distributed_trainer_with_time_constant(quantized, warm_start):
+    return distributed.block_momentum_distributed_trainer(
+        block_size=1024,
+        block_momentum_as_time_constant=4096,
+        distributed_after=warm_start)
+
+def run_distributed_trainer(tmpdir, quantized, create_func):
 
     in1 = input_variable(shape=1)
     labels = input_variable(shape=1)
@@ -25,10 +42,7 @@ def run_distributed_trainer(tmpdir, quantized):
 
     warm_start = (100 if quantized else 0)
 
-    dist_trainer = distributed.data_parallel_distributed_trainer(
-        use_async_buffered_parameter_update=False,
-        num_quantization_bits=(1 if quantized else 32),
-        distributed_after=warm_start)
+    dist_trainer = create_func(quantized, warm_start)
 
     assert dist_trainer.distributed_after == warm_start
 
@@ -67,6 +81,9 @@ def run_distributed_trainer(tmpdir, quantized):
     assert isinstance(trainer.parameter_learners[0], Learner)
 
 def test_distributed(tmpdir, is_1bit_sgd):
-    run_distributed_trainer(tmpdir, quantized=(True if is_1bit_sgd==1 else False))
+    run_distributed_trainer(tmpdir, quantized=(True if is_1bit_sgd==1 else False), create_func=create_data_parallel_distributed_trainer)
+    if is_1bit_sgd == 1:
+        run_distributed_trainer(tmpdir, True, create_func=create_block_momentum_distributed_trainer)
+        run_distributed_trainer(tmpdir, True,  create_func=create_block_momentum_distributed_trainer_with_time_constant)
     distributed.Communicator.finalize()
     

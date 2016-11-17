@@ -33,7 +33,7 @@ namespace CNTK
 
         virtual bool IsDistributed() const override
         {
-            return  m_shim->GetCurrentSamplePosition() >= m_distributedAfterSampleCount;
+            return m_shim->GetCurrentSamplePosition() >= m_distributedAfterSampleCount;
         }
 
     private:
@@ -46,12 +46,12 @@ namespace CNTK
             return Microsoft::MSR::CNTK::InputStreamDescription(s.m_name, CNTKdeviceId, CNTKMatrixType, CNTKMatrixFormat);
         }
 
-        size_t GetCurrentNodeRank();
-
     private: 
         std::unordered_set<StreamInformation> m_streamInfos;
         bool m_epochEndReached;
+        bool m_distributed;
         size_t m_numWorkers;
+        size_t m_workerRank;
         size_t m_distributedAfterSampleCount;
         size_t m_prevMinibatchSize;
         size_t m_epochSize;
@@ -65,8 +65,5 @@ namespace CNTK
         // Shim will be deleted in the future versions.
         std::shared_ptr<Microsoft::MSR::CNTK::ReaderShim<float>> m_shim;
         Microsoft::MSR::CNTK::StreamMinibatchInputs m_matrices;
-
-        // mocker for test
-        DistributedCommunicatorPtr m_mockDistributedCommunicator;
     };
 }

@@ -83,7 +83,7 @@ public:
     }
 };
 
-MinibatchSourcePtr TextFormatMinibatchSourceWithMockCommunicator(const std::wstring& dataFilePath, const std::vector<StreamConfiguration>& streamConfigs, size_t epochSize = MinibatchSource::InfinitelyRepeat, bool randomize = true, size_t distributedAfterSampleCount = MinibatchSource::InfiniteSamples, DistributedCommunicatorPtr* pMockCommunicatoryPtr = nullptr)
+MinibatchSourcePtr TextFormatMinibatchSourceWithMockCommunicator(const std::wstring& dataFilePath, const std::vector<StreamConfiguration>& streamConfigs, size_t epochSize = MinibatchSource::InfinitelyRepeat, bool randomize = true, size_t distributedAfterSampleCount = MinibatchSource::InfiniteSamples, size_t numWorkers = 2, size_t workerRank = 0)
 {
     ::CNTK::Dictionary minibatchSourceConfiguration;
     minibatchSourceConfiguration[L"epochSize"] = epochSize;
@@ -115,8 +115,8 @@ MinibatchSourcePtr TextFormatMinibatchSourceWithMockCommunicator(const std::wstr
     deserializerConfiguration[L"input"] = inputStreamsConfig;
     minibatchSourceConfiguration[L"deserializers"] = std::vector<::CNTK::DictionaryValue>({ deserializerConfiguration });
     minibatchSourceConfiguration[L"distributedAfterSampleCount"] = distributedAfterSampleCount;
-    minibatchSourceConfiguration[L"mockCommunicator"] = reinterpret_cast<size_t>(pMockCommunicatoryPtr);
-
+    minibatchSourceConfiguration[L"numWorkers"] = numWorkers;
+    minibatchSourceConfiguration[L"workerRank"] = workerRank;
     return CreateCompositeMinibatchSource(minibatchSourceConfiguration);
 }
 
@@ -127,7 +127,6 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
     auto featureStreamName = L"features";
     auto labelsStreamName = L"labels";
     const size_t numWorkers = 2;
-    DistributedCommunicatorPtr mockCommunicator = std::make_shared<MockCommunicator>(numWorkers);
 
     auto minibatchSource = TextFormatMinibatchSourceWithMockCommunicator(
         L"SimpleDataTrain_cntk_text.txt",
@@ -135,10 +134,8 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
         MinibatchSource::InfinitelyRepeat,
         randomize,
         warmStartSamples,
-        &mockCommunicator);
-
-    DistributedCommunicatorPtr mockCommunicator2 = std::make_shared<MockCommunicator>(numWorkers);
-    (dynamic_cast<MockCommunicator*>(mockCommunicator2.get()))->MockRank(1);
+        numWorkers,
+        0);
 
     auto minibatchSource2 = TextFormatMinibatchSourceWithMockCommunicator(
         L"SimpleDataTrain_cntk_text.txt",
@@ -146,7 +143,8 @@ void TestMinibatchSourceWarmStart(size_t numMBs, size_t minibatchSize, size_t wa
         MinibatchSource::InfinitelyRepeat,
         randomize,
         warmStartSamples,
-        &mockCommunicator2);
+        numWorkers,
+        1);
 
     auto featureStreamInfo = minibatchSource->StreamInfo(featureStreamName);
     auto labelStreamInfo = minibatchSource->StreamInfo(labelsStreamName);

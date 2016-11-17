@@ -56,7 +56,6 @@ def create_reader(map_file, mean_file, train, distributed_after=INFINITE_SAMPLES
     return MinibatchSource(ImageDeserializer(map_file, StreamDefs(
         features = StreamDef(field='image', transforms=transforms), # first column in map file is referred to as 'image'
         labels   = StreamDef(field='label', shape=num_classes))),      # and second as 'label'
-        randomize = False,
         distributed_after = distributed_after)
 
 #
@@ -128,15 +127,15 @@ def resnet_basic_stack(input, num_filters, num_stack):
 #   
 # Defines the residual network model for classifying images
 #
-def create_resnet_model(input, num_classes, num_layers):
+def create_resnet_model(input, num_classes):
     conv = convolution_bn(input, (3,3), 16)
-    r1_1 = resnet_basic_stack(conv, 16, num_layers)
+    r1_1 = resnet_basic_stack(conv, 16, 3)
 
     r2_1 = resnet_basic_inc(r1_1, 32)
-    r2_2 = resnet_basic_stack(r2_1, 32, num_layers - 1)
+    r2_2 = resnet_basic_stack(r2_1, 32, 2)
 
     r3_1 = resnet_basic_inc(r2_2, 64)
-    r3_2 = resnet_basic_stack(r3_1, 64, num_layers - 1)
+    r3_2 = resnet_basic_stack(r3_1, 64, 2)
 
     pool = GlobalAveragePooling()(r3_2) 
     net = Dense(num_classes, init=he_normal(), activation=None)(pool)
@@ -146,7 +145,7 @@ def create_resnet_model(input, num_classes, num_layers):
 #
 # Train and evaluate the network.
 #
-def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_trainer=None):
+def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_trainer):
 
     # Input variables denoting the features and label data
     input_var = input_variable((num_channels, image_height, image_width))
@@ -157,7 +156,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     input_var_norm = element_times(feature_scale, input_var)
 
     # apply model to input
-    z = create_resnet_model(input_var_norm, 10, num_layers=3) # resnet110
+    z = create_resnet_model(input_var_norm, 10)
 
     #
     # Training action
@@ -172,7 +171,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     minibatch_size = 128
 
     # Set learning parameters
-    lr_per_minibatch       = learning_rate_schedule([0.1]+[1]*80 + [0.1]*40 + [0.01], UnitType.minibatch, epoch_size)
+    lr_per_minibatch       = learning_rate_schedule([1]*80 + [0.1]*40 + [0.01], UnitType.minibatch, epoch_size)
     momentum_time_constant = momentum_as_time_constant_schedule(-minibatch_size/np.log(0.9))
     l2_reg_weight          = 0.0001
     
@@ -201,6 +200,8 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
             sample_count += trainer.previous_minibatch_sample_count         # count samples processed so far
             progress_printer.update_with_trainer(trainer, with_metric=True) # log progress
         progress_printer.epoch_summary(with_metric=True)
+        if distributed_trainer.communicator().current_worker().global_rank == 0:
+            persist.save_model(z, os.path.join(model_path, "CifarResNet_Distributed_{}.dnn".format(epoch)))
     
     #
     # Evaluation action
@@ -239,6 +240,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-q', '--quantize_bit', help='quantized bit', required=False, default='32')
+    parser.add_argument('-b', '--block_size', help='block momentum block size, quantized bit would be ignored if this is set', required=False)
     parser.add_argument('-e', '--epochs', help='total epochs', required=False, default='160')
     parser.add_argument('-w', '--warm_start', help='number of samples to warm start before running distributed', required=False, default='50000')
     args = vars(parser.parse_args())
@@ -246,11 +248,17 @@ if __name__=='__main__':
     epochs = int(args['epochs'])
     distributed_after_samples = int(args['warm_start'])
     
-    print("Start training: quantizeBit = {}, epochs = {}, warm_start = {}".format(num_quantization_bits, epochs, distributed_after_samples))
-
-    distributed_trainer = distributed.data_parallel_distributed_trainer(
-        num_quantization_bits=num_quantization_bits,
-        distributed_after=distributed_after_samples)
+    if args['block_size']:
+        block_size = int(args['block_size'])
+        print("Start training:block_size = {}, epochs = {}, warm_start = {}".format(block_size, epochs, distributed_after_samples))
+        distributed_trainer = distributed.block_momentum_distributed_trainer(
+            block_size=block_size,
+            distributed_after=distributed_after_samples)
+    else:
+        print("Start training: quantize_bit = {}, epochs = {}, warm_start = {}".format(num_quantization_bits, epochs, distributed_after_samples))
+        distributed_trainer = distributed.data_parallel_distributed_trainer(
+            num_quantization_bits=num_quantization_bits,
+            distributed_after=distributed_after_samples)
 
     reader_train = create_reader(os.path.join(data_path, 'train_map.txt'), os.path.join(data_path, 'CIFAR-10_mean.xml'), True, distributed_after_samples)
     reader_test  = create_reader(os.path.join(data_path, 'test_map.txt'), os.path.join(data_path, 'CIFAR-10_mean.xml'), False)
