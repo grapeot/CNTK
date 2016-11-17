@@ -195,7 +195,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs, distributed_traine
     for epoch in range(max_epochs):       # loop over epochs
         sample_count = 0
         while sample_count < epoch_size:  # loop over minibatches in the epoch
-            data = reader_train.next_minibatch(min(minibatch_size, epoch_size - sample_count), input_map=input_map) # fetch minibatch.
+            data = reader_train.next_minibatch(minibatch_size, input_map=input_map) # fetch minibatch.
             trainer.train_minibatch(data)                                   # update model with it
 
             sample_count += trainer.previous_minibatch_sample_count         # count samples processed so far
