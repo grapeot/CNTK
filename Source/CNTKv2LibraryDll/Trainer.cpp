@@ -13,12 +13,13 @@ namespace
 {
     const std::wstring learnersPropertyName = L"Learners";
     const std::wstring distributedLearnerPropertyName = L"DistributedLearner";
+    const std::wstring totalSeenSamplesPropertyName = L"TotalSeenSamples";
 }
 
 namespace CNTK
 {
     Trainer::Trainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const FunctionPtr& evaluationFunction, const std::vector<LearnerPtr>& parameterLearners, const DistributedTrainerPtr& distributedTrainer)
-        : m_model(model), m_lossFunction(lossFunction), m_evaluationFunction(evaluationFunction), m_parameterLearners(parameterLearners), m_prevMinibatchNumSamples(1), m_distributedTrainer(distributedTrainer)
+        : m_model(model), m_lossFunction(lossFunction), m_evaluationFunction(evaluationFunction), m_parameterLearners(parameterLearners), m_prevMinibatchNumSamples(1), m_distributedTrainer(distributedTrainer), m_totalSamplesSeen(0)
     {
         std::vector<Variable> combinedFunctionArgs = { m_model, m_lossFunction };
         if (!m_lossFunction->Output().DynamicAxes().empty())
@@ -157,8 +158,23 @@ namespace CNTK
 
         outputs.insert(outputsToFetch.begin(), outputsToFetch.end());
 
-        if (m_distributedTrainer)
+        bool wasDistributed = IsRunningDistributed();
+
+        // when distributed trainer exists, parallelization starts after specified number of samples seen
+        // before that, all workers run locally without aggregation (and minibatch source run locally as well)
+        // NOTE that this relies on determinism on reader for all workers to reach the same state
+        // TODO: pass the model/parameter from worker-0 to other workers when start parallelization
+        m_totalSamplesSeen += m_prevMinibatchNumSamples;
+
+        bool distributed = IsRunningDistributed();
+
+        if (distributed)
+        {
+            // when switching from not distributed, all workers needs to sync up before starting cooperation
+            if (!wasDistributed) m_distributedTrainer->GetCommunicator()->Barrier();
+
             m_distributedTrainer->PreMinibatchCallback(*this);
+        }
 
         auto backPropSate = m_combinedTrainingFunction->Forward(arguments, outputs, computeDevice, { m_aggregatedLossFunction });
         m_prevMinibatchAggregateTrainingLossValue = outputs[m_aggregatedLossFunction];
@@ -189,7 +205,7 @@ namespace CNTK
         m_prevMinibatchNumSamples = GetSampleCount(m_trainingSampleCountVar, outputs[m_trainingSampleCountVar]);
 
         bool endOfData = m_prevMinibatchNumSamples == 0;
-        if (m_distributedTrainer)
+        if (distributed)
         {
             // Aggregation should happen in the same order, the order of parmaters is guaranteed to be the same.
             std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;
@@ -228,6 +244,15 @@ namespace CNTK
         return anyUpdatesPerformed && !endOfData;
     }
 
+    bool Trainer::IsRunningDistributed() const
+    {
+        return m_distributedTrainer != nullptr &&
+            // TODO: only run distributed with more than 1-worker. 
+            // This is disabled now for V1 parity so that quantization would run for 1-worker
+            //m_distributedTrainer->GetCommunicator()->Workers().size() > 1 &&
+            m_totalSamplesSeen >= m_distributedTrainer->GetDistributedAfterSampleCount();
+    }
+
     static std::wstring GetTrainerStateCheckpointFilePath(const std::wstring& modelFilePath)
     {
         const wchar_t* checkpointExt = L".ckp";
@@ -258,14 +283,13 @@ namespace CNTK
         vector<DictionaryValue> learnerStates;
         for (const auto& learner : m_parameterLearners)
         {
-            // TODO: add DictionaryValue(T&&)
-            learnerStates.push_back(DictionaryValue(learner->Serialize()));
+            learnerStates.push_back(std::move(DictionaryValue(learner->Serialize())));
         }
 
-        // add DictionaryValue ctor that takes an rvalue!
         Dictionary state;
         state[learnersPropertyName] = learnerStates;
         state[distributedLearnerPropertyName] = distributedLearnerState;
+        state[totalSeenSamplesPropertyName] = m_totalSamplesSeen;
 
         m_combinedTrainingFunction->SaveModel(modelFilePath, usinglegacyModelFormat);
         std::wstring trainerStateCheckpointFilePath = GetTrainerStateCheckpointFilePath(modelFilePath);
@@ -284,6 +308,7 @@ namespace CNTK
         Dictionary checkpoint;
         *ckpStream >> checkpoint;
 
+        m_totalSamplesSeen = checkpoint[totalSeenSamplesPropertyName].Value<size_t>();
         const DictionaryValue& learners = checkpoint[learnersPropertyName];
         const vector<DictionaryValue>& learnerStates = learners.Value<vector<DictionaryValue>>();
 

@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft. All rights reserved.
+﻿# Copyright (c) Microsoft. All rights reserved.
 
 # Licensed under the MIT license. See LICENSE.md file in the project root
 # for full license information.
@@ -23,21 +23,24 @@ def run_distributed_trainer(tmpdir, quantized):
     ce = cross_entropy_with_softmax(z, labels)
     errs = classification_error(z, labels)
 
-    if quantized:
-        communicator = distributed.quantized_mpi_communicator(1)
-    else:
-        communicator = distributed.mpi_communicator()
+    warm_start = (100 if quantized else 0)
 
+    dist_trainer = distributed.data_parallel_distributed_trainer(
+        use_async_buffered_parameter_update=False,
+        num_quantization_bits=(1 if quantized else 32),
+        distributed_after=warm_start)
+
+    assert dist_trainer.distributed_after == warm_start
+
+    communicator = dist_trainer.communicator()
     workers = communicator.workers()
     current_worker = communicator.current_worker()
     found_rank = False
     for wk in workers:
         if current_worker.global_rank == wk.global_rank:
             found_rank = True
-    
-    assert found_rank
 
-    dist_trainer = distributed.data_parallel_distributed_trainer(communicator, False)
+    assert found_rank
 
     momentum_time_constant = momentum_as_time_constant_schedule(1100)
     lr_per_sample = learning_rate_schedule(0.007, UnitType.sample)
@@ -49,7 +52,7 @@ def run_distributed_trainer(tmpdir, quantized):
     arguments = {in1: in1_value, labels: label_value}
     z_output = z.output
     updated, var_map = trainer.train_minibatch(arguments, [z_output])
-
+    
     p = str(tmpdir / 'checkpoint.dat')
     trainer.save_checkpoint(p)
     trainer.restore_from_checkpoint(p)

@@ -16,7 +16,7 @@ from cntk import Trainer, distributed, device, persist
 from cntk.cntk_py import DeviceKind_GPU
 from cntk.learner import momentum_sgd, learning_rate_schedule, UnitType, momentum_as_time_constant_schedule
 from cntk.ops import input_variable, constant, parameter, cross_entropy_with_softmax, combine, classification_error, times, element_times, pooling, AVG_POOLING, relu
-from cntk.io import ReaderConfig, ImageDeserializer
+from cntk.io import ReaderConfig, ImageDeserializer, INFINITE_SAMPLES
 from cntk.initializer import he_normal, glorot_uniform
 
 abs_path = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +29,7 @@ MEAN_FILENAME = 'CIFAR-10_mean.xml'
 TEST_MAP_FILENAME = 'test_map.txt'
 
 # Trains a residual network model on the Cifar image dataset
-def cifar_resnet_distributed(data_path, run_test, num_epochs, communicator=None, save_model_filename=None, load_model_filename=None, debug_output=False):
+def cifar_resnet_distributed(data_path, run_test, num_epochs, distributed_trainer=None, save_model_filename=None, load_model_filename=None, debug_output=False):
     image_height = 32
     image_width = 32
     num_channels = 3
@@ -39,7 +39,7 @@ def cifar_resnet_distributed(data_path, run_test, num_epochs, communicator=None,
     labels_stream_name = 'labels'
 
     minibatch_source = create_reader(os.path.join(data_path, 'train_map.txt'), os.path.join(data_path, 'CIFAR-10_mean.xml'), True,
-                                     distributed_communicator = communicator)
+                                     distributed_trainer.distributed_after if distributed_trainer else INFINITE_SAMPLES)
 
     features_si = minibatch_source[feats_stream_name]
     labels_si = minibatch_source[labels_stream_name]
@@ -72,16 +72,13 @@ def cifar_resnet_distributed(data_path, run_test, num_epochs, communicator=None,
     lr_per_minibatch = learning_rate_schedule(lr_schedule, UnitType.minibatch, mb_size * num_mb_per_epoch)
     momentum_time_constant = momentum_as_time_constant_schedule(-mb_size/np.log(0.9))
 
-    # create data parallel distributed trainer if needed
-    dist_trainer = distributed.data_parallel_distributed_trainer(communicator, False) if communicator else None
-
     # Instantiate the trainer object to drive the model training
     trainer = Trainer(classifier_output, ce, pe,
                       [momentum_sgd(classifier_output.parameters, lr=lr_per_minibatch, momentum=momentum_time_constant, l2_regularization_weight=0.0001)],
-                      distributed_trainer = dist_trainer)
+                      distributed_trainer = distributed_trainer)
     
     # Get minibatches of images to train with and perform model training
-    training_progress_output_freq = 100 if communicator else 20
+    training_progress_output_freq = 100 if distributed_trainer else 20
 
     if debug_output:
         training_progress_output_freq = training_progress_output_freq/4
@@ -132,15 +129,15 @@ def cifar_resnet_distributed(data_path, run_test, num_epochs, communicator=None,
 
         
 def train_and_evaluate(data_path, total_epochs, gpu_count=1):
-    # Create distributed communicator for 1-bit SGD for better scaling to multiple GPUs
+    # Create distributed trainer for 1-bit SGD for better scaling to multiple GPUs
     # If you'd like to avoid quantization loss, use simple one instead
-    quantization_bit = 1
+    quantization_bit = 32
 
-    if (quantization_bit == 32):
-        communicator = distributed.mpi_communicator()
-    else:
-        communicator = distributed.quantized_mpi_communicator(quantization_bit)
+    distributed_trainer = distributed.data_parallel_distributed_trainer(
+        num_quantization_bits=quantization_bit,
+        distributed_after=0)
 
+    communicator = distributed_trainer.communicator()
     workers = communicator.workers()
     current_worker = communicator.current_worker()
     print("List all distributed workers")
@@ -162,12 +159,12 @@ def train_and_evaluate(data_path, total_epochs, gpu_count=1):
 
     # training the start model only in one worker
     if communicator.current_worker().global_rank == 0:
-        cifar_resnet_distributed(data_path, save_model_filename=start_model, communicator=None, run_test=False, num_epochs=num_start_epochs)
+        cifar_resnet_distributed(data_path, save_model_filename=start_model, distributed_trainer=None, run_test=False, num_epochs=num_start_epochs)
     
     communicator.barrier()
     
     # train in parallel
-    error = cifar_resnet_distributed(data_path, load_model_filename=start_model, communicator=communicator, run_test=True, num_epochs=num_parallel_epochs)
+    error = cifar_resnet_distributed(data_path, load_model_filename=start_model, distributed_trainer=distributed_trainer, run_test=True, num_epochs=num_parallel_epochs)
 
     distributed.Communicator.finalize()
     return error

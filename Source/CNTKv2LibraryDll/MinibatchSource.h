@@ -16,10 +16,11 @@ namespace CNTK
 {
     class CompositeMinibatchSource final : public MinibatchSource
     {
-        static const std::wstring MinibatchSourcePositionAttributeName;
+        static const std::wstring PositionAttributeName;
+        static const std::wstring DistributedAfterSampleCountAttributeName;
 
     public:
-        CompositeMinibatchSource(const Dictionary& configuration, DistributedCommunicatorPtr communicator);
+        CompositeMinibatchSource(const Dictionary& configuration);
 
         virtual const std::unordered_set<StreamInformation>& StreamInfos() override { return m_streamInfos; }
 
@@ -29,6 +30,11 @@ namespace CNTK
 
         virtual Dictionary GetCheckpointState() const override;
         virtual void RestoreFromCheckpoint(const Dictionary& checkpoint) override;
+
+        virtual bool IsDistributed() const override
+        {
+            return  m_shim->GetCurrentSamplePosition() >= m_distributedAfterSampleCount;
+        }
 
     private:
         static Microsoft::MSR::CNTK::InputStreamDescription GetInputStreamDescription(const StreamInformation& s, const DeviceDescriptor& device)
@@ -40,10 +46,13 @@ namespace CNTK
             return Microsoft::MSR::CNTK::InputStreamDescription(s.m_name, CNTKdeviceId, CNTKMatrixType, CNTKMatrixFormat);
         }
 
+        size_t GetCurrentNodeRank();
+
     private: 
-        DistributedCommunicatorPtr m_communicator;
         std::unordered_set<StreamInformation> m_streamInfos;
         bool m_epochEndReached;
+        size_t m_numWorkers;
+        size_t m_distributedAfterSampleCount;
         size_t m_prevMinibatchSize;
         size_t m_epochSize;
         size_t m_truncationLength;
@@ -56,5 +65,8 @@ namespace CNTK
         // Shim will be deleted in the future versions.
         std::shared_ptr<Microsoft::MSR::CNTK::ReaderShim<float>> m_shim;
         Microsoft::MSR::CNTK::StreamMinibatchInputs m_matrices;
+
+        // mocker for test
+        DistributedCommunicatorPtr m_mockDistributedCommunicator;
     };
 }

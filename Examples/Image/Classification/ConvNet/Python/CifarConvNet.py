@@ -150,7 +150,7 @@ def train_and_evaluate(reader_train, reader_test, max_epochs):
             data = reader_train.next_minibatch(min(minibatch_size, epoch_size - sample_count), input_map=input_map) # fetch minibatch.
             trainer.train_minibatch(data)                                   # update model with it
 
-            sample_count += data[label_var].num_samples                     # count samples processed so far
+            sample_count += trainer.previous_minibatch_sample_count         # count samples processed so far
             progress_printer.update_with_trainer(trainer, with_metric=True) # log progress
         progress_printer.epoch_summary(with_metric=True)
     

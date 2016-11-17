@@ -9,8 +9,9 @@
 
 namespace CNTK
 {
-    DistributedTrainerBase::DistributedTrainerBase(DistributedCommunicatorPtr communicator)
-        : m_communicator(communicator)
+    DistributedTrainerBase::DistributedTrainerBase(DistributedCommunicatorPtr communicator, size_t distributedAfterSampleCount)
+        : DistributedTrainer(distributedAfterSampleCount),
+          m_communicator(communicator)
     {
     }
 
