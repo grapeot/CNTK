@@ -159,6 +159,14 @@ namespace CNTK
 
     bool Trainer::TrainMinibatch(const std::unordered_map<Variable, ValuePtr>& arguments, std::unordered_map<Variable, ValuePtr>& outputsToFetch, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
     {
+        {
+            // TODO: We should reconsider the interface
+            // Probably passing the flag that the minibatch is the last, and empty arguments in case of empty minibatch.
+            bool emptyMinibatch = arguments.empty() || (arguments.begin()->second == nullptr);
+            if (emptyMinibatch)
+                return HandleEmptyMinibatch(arguments.empty());
+        }
+
         std::unordered_map<Variable, ValuePtr> outputs = { { m_aggregatedLossFunction, nullptr }, { m_trainingSampleCountVar, nullptr } };
         if (m_aggregatedEvaluationFunction)
             outputs.insert({ m_aggregatedEvaluationFunction, nullptr });
@@ -206,20 +214,20 @@ namespace CNTK
             parameterGradients[parameter] = nullptr;
         }
 
+        // TODO: Why Backward signature does not take Parameter instead of Variable for gradients?
         m_combinedTrainingFunction->Backward(backPropSate, { { m_aggregatedLossFunction, rootGradientValue } }, parameterGradients);
 
         m_prevMinibatchNumSamples = GetSampleCount(m_trainingSampleCountVar, outputs[m_trainingSampleCountVar]);
         m_totalSamplesSeen += m_prevMinibatchNumSamples;
 
+        std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;
+        gradients.reserve(modelParameters.size());
+        for (const auto& parameter : modelParameters)
+            gradients.push_back(std::make_pair(parameter, parameterGradients[parameter]->Data()));
+
         bool endOfData = m_prevMinibatchNumSamples == 0;
         if (m_distributed)
         {
-            // Aggregation should happen in the same order, the order of parmaters is guaranteed to be the same.
-            std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;
-            gradients.reserve(modelParameters.size());
-            for (const auto& parameter : modelParameters)
-                gradients.push_back(std::make_pair(parameter, parameterGradients[parameter]->Data()));
-
             MinibatchInfo info
             {
                 arguments.empty(),
@@ -232,6 +240,11 @@ namespace CNTK
             m_prevMinibatchNumSamples = info.numberOfSamples;
         }
 
+        return UpdateLearners(std::unordered_map<Parameter, NDArrayViewPtr>(gradients.begin(), gradients.end())) && !endOfData;
+    }
+
+    bool Trainer::UpdateLearners(const std::unordered_map<Parameter, NDArrayViewPtr>& gradients)
+    {
         bool anyUpdatesPerformed = false;
         for (auto learner : m_parameterLearners)
         {
@@ -239,16 +252,46 @@ namespace CNTK
             const auto& learnerParameters = learner->Parameters();
             for (const auto& parameter : learnerParameters)
             {
-                learnerParameterGradients[parameter] = parameterGradients[parameter]->Data();
+                auto value = gradients.find(parameter);
+                if (value == gradients.end())
+                    LogicError("Learner contains parameter that does not exists in the model");
 
-                if (parameterGradients[parameter]->Mask())
-                    LogicError("The gradient value for a Parameter cannot have an associated mask!");
+                learnerParameterGradients[parameter] = value->second;
             }
 
             anyUpdatesPerformed |= learner->Update(learnerParameterGradients, m_prevMinibatchNumSamples);
         }
+        return anyUpdatesPerformed;
+    }
 
-        return anyUpdatesPerformed && !endOfData;
+    bool Trainer::HandleEmptyMinibatch(bool atEndOfData)
+    {
+        assert(m_distributedTrainer != nullptr);
+
+        m_prevMinibatchNumSamples = 0;
+
+        // Gradients are not existing.
+        std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;
+        auto modelParameters = m_combinedTrainingFunction->Parameters();
+        gradients.reserve(modelParameters.size());
+        for (const auto& parameter : modelParameters)
+            gradients.push_back(std::make_pair(parameter, nullptr));
+
+        MinibatchInfo info
+        {
+            atEndOfData,
+            0,
+            m_prevMinibatchAggregateTrainingLossValue->Data(),
+            m_prevMinibatchAggregateEvalCriterionValue->Data()
+        };
+
+        bool end = m_distributedTrainer->PreParameterUpdateCallback(*this, gradients, info);
+        m_prevMinibatchNumSamples = info.numberOfSamples;
+
+        bool anyUpdatesPerformed = false;
+        if (!m_prevMinibatchNumSamples)
+            anyUpdatesPerformed = UpdateLearners(std::unordered_map<Parameter, NDArrayViewPtr>(gradients.begin(), gradients.end()));
+        return anyUpdatesPerformed && !end;
     }
 
     bool Trainer::IsRunningDistributed() const

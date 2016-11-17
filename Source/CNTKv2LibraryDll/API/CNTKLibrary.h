@@ -3370,6 +3370,8 @@ namespace CNTK
 
     private:
         void Save(const std::wstring& modelFilePath, bool usingLegacyModelFormat, const Dictionary& state);
+        bool UpdateLearners(const std::unordered_map<Parameter, NDArrayViewPtr>& gradients);
+        bool HandleEmptyMinibatch(bool atEndOfData);
 
         FunctionPtr m_combinedTrainingFunction;
         FunctionPtr m_model;

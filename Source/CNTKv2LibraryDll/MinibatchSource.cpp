@@ -277,6 +277,8 @@ namespace CNTK
 
             auto hasData = m_shim->GetMinibatch(m_matrices);
             m_epochEndReached = m_shim->IsEndOfEpoch();
+            if (m_epochEndReached && !hasData)
+                return m_minibatchData;
 
             for (const auto& s: m_streamInfos)
             {
@@ -286,8 +288,7 @@ namespace CNTK
                 ValuePtr minibatchValuePtr;
                 if (!hasData)
                 {
-                    minibatchValuePtr = MakeSharedObject<Value>(MakeSharedObject<NDArrayView>(currentStreamInfo.m_elementType, s.m_sampleLayout.AppendShape({ 0, 0 }), DeviceDescriptor::CPUDevice()));
-                    m_minibatchData[currentStreamInfo] = { 0, 0, minibatchValuePtr };
+                    m_minibatchData[currentStreamInfo] = { 0, 0, nullptr };
                     continue;
                 }
 
