@@ -19,7 +19,14 @@ namespace
 namespace CNTK
 {
     Trainer::Trainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const FunctionPtr& evaluationFunction, const std::vector<LearnerPtr>& parameterLearners, const DistributedTrainerPtr& distributedTrainer)
-        : m_model(model), m_lossFunction(lossFunction), m_evaluationFunction(evaluationFunction), m_parameterLearners(parameterLearners), m_prevMinibatchNumSamples(1), m_distributedTrainer(distributedTrainer), m_totalSamplesSeen(0)
+        : m_model(model),
+          m_lossFunction(lossFunction),
+          m_evaluationFunction(evaluationFunction),
+          m_parameterLearners(parameterLearners),
+          m_prevMinibatchNumSamples(1),
+          m_distributedTrainer(distributedTrainer),
+          m_totalSamplesSeen(0),
+          m_distributed(false)
     {
         std::vector<Variable> combinedFunctionArgs = { m_model, m_lossFunction };
         if (!m_lossFunction->Output().DynamicAxes().empty())
@@ -158,17 +165,16 @@ namespace CNTK
 
         outputs.insert(outputsToFetch.begin(), outputsToFetch.end());
 
-        bool wasDistributed = IsRunningDistributed();
+        bool wasDistributed = m_distributed;
 
         // when distributed trainer exists, parallelization starts after specified number of samples seen
         // before that, all workers run locally without aggregation (and minibatch source run locally as well)
         // NOTE that this relies on determinism on reader for all workers to reach the same state
         // TODO: pass the model/parameter from worker-0 to other workers when start parallelization
-        m_totalSamplesSeen += m_prevMinibatchNumSamples;
 
-        bool distributed = IsRunningDistributed();
+        m_distributed = IsRunningDistributed();
 
-        if (distributed)
+        if (m_distributed)
         {
             // when switching from not distributed, all workers needs to sync up before starting cooperation
             if (!wasDistributed) m_distributedTrainer->GetCommunicator()->Barrier();
@@ -203,9 +209,10 @@ namespace CNTK
         m_combinedTrainingFunction->Backward(backPropSate, { { m_aggregatedLossFunction, rootGradientValue } }, parameterGradients);
 
         m_prevMinibatchNumSamples = GetSampleCount(m_trainingSampleCountVar, outputs[m_trainingSampleCountVar]);
+        m_totalSamplesSeen += m_prevMinibatchNumSamples;
 
         bool endOfData = m_prevMinibatchNumSamples == 0;
-        if (distributed)
+        if (m_distributed)
         {
             // Aggregation should happen in the same order, the order of parmaters is guaranteed to be the same.
             std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;

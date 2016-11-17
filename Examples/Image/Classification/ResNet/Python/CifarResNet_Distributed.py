@@ -15,7 +15,7 @@ from cntk.models import Sequential, LayerStack
 from cntk.utils import *
 from cntk.io import MinibatchSource, ImageDeserializer, StreamDef, StreamDefs, INFINITE_SAMPLES
 from cntk.initializer import glorot_uniform, he_normal
-from cntk import Trainer, distributed
+from cntk import Trainer, distributed, persist
 from cntk.learner import momentum_sgd, learning_rate_schedule, UnitType, momentum_as_time_constant_schedule
 from cntk.ops import cross_entropy_with_softmax, classification_error, relu
 from cntk.ops import input_variable, constant, parameter, combine, times, element_times
@@ -56,6 +56,7 @@ def create_reader(map_file, mean_file, train, distributed_after=INFINITE_SAMPLES
     return MinibatchSource(ImageDeserializer(map_file, StreamDefs(
         features = StreamDef(field='image', transforms=transforms), # first column in map file is referred to as 'image'
         labels   = StreamDef(field='label', shape=num_classes))),      # and second as 'label'
+        randomize = False,
         distributed_after = distributed_after)
 
 #
