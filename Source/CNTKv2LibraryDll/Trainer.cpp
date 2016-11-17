@@ -220,6 +220,7 @@ namespace CNTK
         m_prevMinibatchNumSamples = GetSampleCount(m_trainingSampleCountVar, outputs[m_trainingSampleCountVar]);
         m_totalSamplesSeen += m_prevMinibatchNumSamples;
 
+        // Aggregation should happen in the same order, the order of parmaters is guaranteed to be the same.
         std::vector<std::pair<Parameter, NDArrayViewPtr>> gradients;
         gradients.reserve(modelParameters.size());
         for (const auto& parameter : modelParameters)
@@ -261,12 +262,13 @@ namespace CNTK
 
             anyUpdatesPerformed |= learner->Update(learnerParameterGradients, m_prevMinibatchNumSamples);
         }
+
         return anyUpdatesPerformed;
     }
 
     bool Trainer::HandleEmptyMinibatch(bool atEndOfData)
     {
-        assert(m_distributedTrainer != nullptr);
+        if (m_distributedTrainer == nullptr) return false;
 
         m_prevMinibatchNumSamples = 0;
 

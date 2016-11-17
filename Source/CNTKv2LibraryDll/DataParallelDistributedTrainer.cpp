@@ -112,20 +112,7 @@ namespace CNTK
     // Optional override that gets called per minibatch after finishing gradient computation but before updating model parameters
     bool DataParallelDistributedTrainer::PreParameterUpdateCallback(const Trainer& /*trainer*/, std::vector<std::pair<Parameter, NDArrayViewPtr>>& gradientValues, MinibatchInfo& info)
     {
-        if (info.numberOfSamples == 0)
-        {
-            // Need to intialize gradients to 0 in case when it is an empty minibatch.
-            for (auto& g : gradientValues)
-            {
-                auto weights = g.first.Value();
-                g.second = MakeSharedObject<NDArrayView>(0, weights->GetDataType(), weights->Shape(), weights->Device());
-            }
-
-            // TODO: what if in the future the type is different?
-            auto dataType = gradientValues.front().first.GetDataType();
-            info.evalCriterionValue = MakeSharedObject<NDArrayView>(0, dataType, NDShape{ 1 } , DeviceDescriptor::CPUDevice());
-            info.trainingLossValue = MakeSharedObject<NDArrayView>(0, dataType, NDShape{ 1 }, DeviceDescriptor::CPUDevice());
-        }
+        HandleEmptyMinibatch(gradientValues, info);
 
         std::vector<NDArrayViewPtr> valuesToAggregate;
         for (const auto& i : gradientValues)
